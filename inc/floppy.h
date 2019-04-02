@@ -44,21 +44,26 @@ struct hfe_image {
     } write_batch;
 };
 
+struct img_sec {
+    uint8_t id;
+    uint8_t no; /* 3 bits */
+};
+
 struct img_image {
     uint32_t trk_off, base_off;
     uint16_t trk_sec, rd_sec_pos;
-    uint16_t rpm;
+    uint16_t rpm, nr_sectors;
     int32_t decode_pos;
     uint16_t decode_data_pos, crc;
     uint8_t layout; /* LAYOUT_* */
     bool_t has_iam;
     uint8_t gap_2, gap_3, gap_4a;
     uint8_t post_crc_syncs;
-    int8_t write_sector;
-    uint8_t sec_base[2], sec_map[64];
-    uint8_t nr_sectors, sec_no;
-    uint8_t interleave:4, skew:4;
-    bool_t skew_cyls_only;
+    int16_t write_sector;
+    uint8_t sec_base[4], *sec_map;
+    struct img_sec *sec_info;
+    uint8_t sec_no;
+    uint8_t interleave, cskew, sskew;
     uint16_t data_rate, gap_4;
     uint32_t idx_sz, idam_sz;
     uint16_t dam_sz_pre, dam_sz_post;
@@ -215,8 +220,10 @@ void floppy_insert(unsigned int unit, struct slot *slot);
 void floppy_cancel(void);
 bool_t floppy_handle(void); /* TRUE -> re-read config file */
 void floppy_set_cyl(uint8_t unit, uint8_t cyl);
-void floppy_get_track(uint8_t *p_cyl, uint8_t *p_side, uint8_t *p_sel,
-                      uint8_t *p_writing);
+struct track_info {
+    uint8_t cyl, side, sel, writing;
+};
+void floppy_get_track(struct track_info *ti);
 void floppy_set_fintf_mode(void);
 
 /*

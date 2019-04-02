@@ -16,24 +16,22 @@ static bool_t img_read_track(struct image *im);
 static bool_t img_write_track(struct image *im);
 static bool_t mfm_open(struct image *im);
 static bool_t mfm_read_track(struct image *im);
-static bool_t mfm_write_track(struct image *im);
 static bool_t fm_open(struct image *im);
 static bool_t fm_read_track(struct image *im);
-static bool_t fm_write_track(struct image *im);
 
 static bool_t msx_open(struct image *im);
 static bool_t pc_dos_open(struct image *im);
 static bool_t ti99_open(struct image *im);
 
-#define LAYOUT_interleaved              0
-#define LAYOUT_interleaved_swap_sides   1
-#define LAYOUT_sequential_reverse_side1 2
+#define LAYOUT_sequential      (1u<<0)
+#define LAYOUT_sides_swapped   (1u<<1)
+#define LAYOUT_reverse_side(x) (1u<<(2+(x)))
 
-#define sec_sz(im) (128u << (im)->img.sec_no)
+#define sec_sz(n) (128u << (n))
 
 #define _IAM 1 /* IAM */
 #define _ITN 1 /* inter-track numbering */
-#define _C(cyls) ((cyls) / 40)
+#define _C(cyls) ((cyls) / 40 - 1)
 #define _R(rpm) ((rpm) / 60 - 5)
 #define _S(sides) ((sides) - 1)
 const static struct img_type {
@@ -45,94 +43,97 @@ const static struct img_type {
     uint8_t no:3;
     uint8_t base:1;
     uint8_t inter_track_numbering:1;
-    uint8_t skew:4;
-    uint8_t cyls:2;
-    uint8_t rpm:2;
+    uint8_t cskew:4;
+    uint8_t sskew:2;
+    uint8_t cyls:1;
+    uint8_t rpm:1;
 } img_type[] = {
-    {  8, _S(1), _IAM, 84, 1, 2, 1, 0, 0, _C(40), _R(300) }, /* 160k */
-    {  9, _S(1), _IAM, 84, 1, 2, 1, 0, 0, _C(40), _R(300) }, /* 180k */
-    { 10, _S(1), _IAM, 30, 1, 2, 1, 0, 0, _C(40), _R(300) }, /* 200k */
-    {  8, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(40), _R(300) }, /* 320k */
-    {  9, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(40), _R(300) }, /* 360k (#1) */
-    { 10, _S(2), _IAM, 30, 1, 2, 1, 0, 0, _C(40), _R(300) }, /* 400k (#1) */
-    { 15, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(360) }, /* 1.2MB */
-    {  9, _S(1), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 360k (#2) */
-    { 10, _S(1), _IAM, 30, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 400k (#2) */
-    { 11, _S(1), _IAM,  3, 2, 2, 1, 0, 0, _C(80), _R(300) }, /* 440k */
-    {  8, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 640k */
-    {  9, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 720k */
-    { 10, _S(2), _IAM, 30, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 800k */
-    { 11, _S(2), _IAM,  3, 2, 2, 1, 0, 0, _C(80), _R(300) }, /* 880k */
-    { 18, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 1.44M */
-    { 19, _S(2), _IAM, 70, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 1.52M */
-    { 21, _S(2), _IAM, 18, 2, 2, 1, 0, 0, _C(80), _R(300) }, /* 1.68M */
-    { 20, _S(2), _IAM, 40, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 1.6M */
-    { 36, _S(2), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 2.88M */
+    {  8, _S(1), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(40), _R(300) }, /* 160k */
+    {  9, _S(1), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(40), _R(300) }, /* 180k */
+    { 10, _S(1), _IAM, 30, 1, 2, 1, 0, 0, 0, _C(40), _R(300) }, /* 200k */
+    {  8, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(40), _R(300) }, /* 320k */
+    {  9, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(40), _R(300) }, /* 360k (#1) */
+    { 10, _S(2), _IAM, 30, 1, 2, 1, 0, 0, 0, _C(40), _R(300) }, /* 400k (#1) */
+    { 15, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(360) }, /* 1.2MB */
+    {  9, _S(1), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 360k (#2) */
+    { 10, _S(1), _IAM, 30, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 400k (#2) */
+    { 11, _S(1), _IAM,  3, 2, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 440k */
+    {  8, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 640k */
+    {  9, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 720k */
+    { 10, _S(2), _IAM, 30, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 800k */
+    { 11, _S(2), _IAM,  3, 2, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 880k */
+    { 18, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 1.44M */
+    { 19, _S(2), _IAM, 70, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 1.52M */
+    { 21, _S(2), _IAM, 18, 2, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 1.68M */
+    { 20, _S(2), _IAM, 40, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 1.6M */
+    { 36, _S(2), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 2.88M */
     { 0 }
 }, adfs_type[] = {
     /* ADFS D/E: 5 * 1kB, 800k */
-    {  5, _S(2), _IAM, 116, 1, 3, 0, 0, 1, _C(80), _R(300) },
+    {  5, _S(2), _IAM, 116, 1, 3, 0, 0, 1, 0, _C(80), _R(300) },
     /* ADFS F: 10 * 1kB, 1600k */
-    { 10, _S(2), _IAM, 116, 1, 3, 0, 0, 2, _C(80), _R(300) },
+    { 10, _S(2), _IAM, 116, 1, 3, 0, 0, 2, 0, _C(80), _R(300) },
     /* ADFS L 640k */
-    { 16, _S(2), _IAM,  57, 1, 1, 0, 0, 0, _C(80), _R(300) },
+    { 16, _S(2), _IAM,  57, 1, 1, 0, 0, 0, 0, _C(80), _R(300) },
     /* ADFS M 320k */
-    { 16, _S(1), _IAM,  57, 1, 1, 0, 0, 0, _C(80), _R(300) },
+    { 16, _S(1), _IAM,  57, 1, 1, 0, 0, 0, 0, _C(80), _R(300) },
     /* ADFS S 160k */
-    { 16, _S(1), _IAM,  57, 1, 1, 0, 0, 0, _C(40), _R(300) },
+    { 16, _S(1), _IAM,  57, 1, 1, 0, 0, 0, 0, _C(40), _R(300) },
     { 0 }
 }, akai_type[] = {
     /* Akai DD:  5*1kB sectors */
-    {  5, _S(2), _IAM, 116, 1, 3, 1, 0, 0, _C(80), _R(300) },
+    {  5, _S(2), _IAM, 116, 1, 3, 1, 0, 0, 0, _C(80), _R(300) },
     /* Akai HD: 10*1kB sectors */
-    { 10, _S(2), _IAM, 116, 1, 3, 1, 0, 0, _C(80), _R(300) },
+    { 10, _S(2), _IAM, 116, 1, 3, 1, 0, 0, 0, _C(80), _R(300) },
     { 0 }
 }, casio_type[] = {
-    { 8, _S(2), _IAM, 116, 3, 3, 1, 0, 0, _C(80), _R(360) }, /* 1280k */
+    { 8, _S(2), _IAM, 116, 3, 3, 1, 0, 0, 0, _C(80), _R(360) }, /* 1280k */
     { 0 }
 }, d81_type[] = {
-    { 10, _S(2), _IAM, 30, 1, 2, 1, 0, 0, _C(80), _R(300) },
+    { 10, _S(2), _IAM, 30, 1, 2, 1, 0, 0, 0, _C(80), _R(300) },
     { 0 }
 }, dec_type[] = {
-    { 10, _S(1), _IAM, 30, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* RX50 (400k) */
-    { 0 } /* RX33 (1.2MB) from default list */
+    /* RX50 (400k) */
+    { 10, _S(1), _IAM, 30, 1, 2, 1, 0, 0, 0, _C(80), _R(300) },
+    /* RX33 (1.2MB) from default list */
+    { 0 }
 }, ensoniq_type[] = {
-    { 10, _S(2), _IAM, 30, 1, 2, 0, 0, 0, _C(80), _R(300) }, /* 800kB */
-    { 20, _S(2), _IAM, 40, 1, 2, 0, 0, 0, _C(80), _R(300) }, /* 1.6MB */
+    { 10, _S(2), _IAM, 30, 1, 2, 0, 0, 0, 0, _C(80), _R(300) }, /* 800kB */
+    { 20, _S(2), _IAM, 40, 1, 2, 0, 0, 0, 0, _C(80), _R(300) }, /* 1.6MB */
     { 0 }
 }, fluke_type[] = {
-    { 16, _S(2), _IAM, 57, 2, 1, 0, 0, 0, _C(80), _R(300) },
+    { 16, _S(2), _IAM, 57, 2, 1, 0, 0, 0, 0, _C(80), _R(300) },
     { 0 }
 }, kaypro_type[] = {
-    { 10, _S(1), _IAM, 30, 3, 2, 0, _ITN, 0, _C(40), _R(300) }, /* 200k */
-    { 10, _S(2), _IAM, 30, 3, 2, 0, _ITN, 0, _C(40), _R(300) }, /* 400k */
-    { 10, _S(2), _IAM, 30, 3, 2, 0, _ITN, 0, _C(80), _R(300) }, /* 800k */
+    { 10, _S(1), _IAM, 30, 3, 2, 0, _ITN, 0, 0, _C(40), _R(300) }, /* 200k */
+    { 10, _S(2), _IAM, 30, 3, 2, 0, _ITN, 0, 0, _C(40), _R(300) }, /* 400k */
+    { 10, _S(2), _IAM, 30, 3, 2, 0, _ITN, 0, 0, _C(80), _R(300) }, /* 800k */
     { 0 }
 }, mbd_type[] = {
-    { 11, _S(2), _IAM,  30, 1, 3, 1, 0, 0, _C(80), _R(300) },
-    {  5, _S(2), _IAM, 116, 3, 1, 1, 0, 0, _C(80), _R(300) },
-    { 11, _S(2), _IAM,  30, 1, 3, 1, 0, 0, _C(40), _R(300) },
-    {  5, _S(2), _IAM, 116, 3, 1, 1, 0, 0, _C(40), _R(300) },
+    { 11, _S(2), _IAM,  30, 1, 3, 1, 0, 0, 0, _C(80), _R(300) },
+    {  5, _S(2), _IAM, 116, 3, 1, 1, 0, 0, 0, _C(80), _R(300) },
+    { 11, _S(2), _IAM,  30, 1, 3, 1, 0, 0, 0, _C(40), _R(300) },
+    {  5, _S(2), _IAM, 116, 3, 1, 1, 0, 0, 0, _C(40), _R(300) },
     { 0 }
 }, memotech_type[] = {
-    { 16, _S(2), _IAM, 57, 3, 1, 1, 0, 0, _C(40), _R(300) }, /* Type 03 */
-    { 16, _S(2), _IAM, 57, 3, 1, 1, 0, 0, _C(80), _R(300) }, /* Type 07 */
+    { 16, _S(2), _IAM, 57, 3, 1, 1, 0, 0, 0, _C(40), _R(300) }, /* Type 03 */
+    { 16, _S(2), _IAM, 57, 3, 1, 1, 0, 0, 0, _C(80), _R(300) }, /* Type 07 */
     { 0 }
 }, msx_type[] = {
-    { 8, _S(1), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 320k */
-    { 9, _S(1), _IAM, 84, 1, 2, 1, 0, 0, _C(80), _R(300) }, /* 360k */
+    { 8, _S(1), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 320k */
+    { 9, _S(1), _IAM, 84, 1, 2, 1, 0, 0, 0, _C(80), _R(300) }, /* 360k */
     { 0 } /* all other formats from default list */
 }, nascom_type[] = {
-    { 16, _S(1), _IAM, 57, 3, 1, 1, 0, 8, _C(80), _R(300) }, /* 320k */
-    { 16, _S(2), _IAM, 57, 3, 1, 1, 0, 8, _C(80), _R(300) }, /* 360k */
+    { 16, _S(1), _IAM, 57, 3, 1, 1, 0, 8, 0, _C(80), _R(300) }, /* 320k */
+    { 16, _S(2), _IAM, 57, 3, 1, 1, 0, 8, 0, _C(80), _R(300) }, /* 360k */
     { 0 }
 }, pc98_type[] = {
-    { 8, _S(2), _IAM, 116, 1, 3, 1, 0, 0, _C(80), _R(360) }, /* 1232k */
-    { 8, _S(2), _IAM, 116, 1, 2, 1, 0, 0, _C(80), _R(360) }, /* 640k */
-    { 9, _S(2), _IAM, 116, 1, 2, 1, 0, 0, _C(80), _R(360) }, /* 720k */
+    { 8, _S(2), _IAM, 116, 1, 3, 1, 0, 0, 0, _C(80), _R(360) }, /* 1232k */
+    { 8, _S(2), _IAM, 116, 1, 2, 1, 0, 0, 0, _C(80), _R(360) }, /* 640k */
+    { 9, _S(2), _IAM, 116, 1, 2, 1, 0, 0, 0, _C(80), _R(360) }, /* 720k */
     { 0 }
 }, uknc_type[] = {
-    { 10, _S(2), 0, 38, 1, 2, 1, 0, 0, _C(80), _R(300) },
+    { 10, _S(2), 0, 38, 1, 2, 1, 0, 0, 0, _C(80), _R(300) },
     { 0 }
 };
 
@@ -142,15 +143,27 @@ static FSIZE_t im_size(struct image *im)
         : (f_size(&im->fp) - im->img.base_off);
 }
 
-static uint8_t sec_base(struct image *im)
+static void init_sec_base(struct image *im, uint8_t base)
 {
-    return im->img.sec_base[im->cur_track & (im->nr_sides - 1)];
+    memset(im->img.sec_base, base, sizeof(im->img.sec_base));
 }
 
-static unsigned int enc_sec_sz(struct image *im)
+static uint8_t sec_base(struct image *im)
+{
+    unsigned int i = ((im->cur_track/2) == 0) ? 0 : 2;
+    return im->img.sec_base[i + (im->cur_track & (im->nr_sides - 1))];
+}
+
+static unsigned int enc_sec_sz(struct image *im, struct img_sec *sec)
 {
     return im->img.idam_sz + im->img.dam_sz_pre
-        + sec_sz(im) + im->img.dam_sz_post;
+        + sec_sz(sec ? sec->no : im->img.sec_no) + im->img.dam_sz_post;
+}
+
+static void reset_img_params(struct image *im)
+{
+    memset(&im->img, 0, sizeof(im->img));
+    im->nr_cyls = im->nr_sides = 0;
 }
 
 static bool_t _img_open(struct image *im, const struct img_type *type)
@@ -185,13 +198,14 @@ found:
     im->nr_sides = nr_sides;
     im->img.sec_no = type->no;
     im->img.interleave = type->interleave;
-    im->img.skew = type->skew;
+    im->img.sskew = type->sskew;
+    im->img.cskew = type->cskew;
     im->img.nr_sectors = type->nr_secs;
     im->img.gap_3 = type->gap3;
     im->img.rpm = (type->rpm + 5) * 60;
-    im->img.sec_base[0] = im->img.sec_base[1] = type->base;
+    init_sec_base(im, type->base);
     if (type->inter_track_numbering == _ITN)
-        im->img.sec_base[1] += im->img.nr_sectors;
+        im->img.sec_base[3] = (im->img.sec_base[1] += im->img.nr_sectors);
     im->img.has_iam = type->has_iam;
 
     return mfm_open(im);
@@ -199,13 +213,191 @@ found:
 
 static bool_t adfs_open(struct image *im)
 {
-    im->img.skew_cyls_only = TRUE;
     return _img_open(im, adfs_type);
+}
+
+enum tag_result { TR_success, TR_fail, TR_no_match };
+static enum tag_result tag_open(struct image *im, char *tag)
+{
+    enum {
+        IMGCFG_cyls,
+        IMGCFG_heads,
+        IMGCFG_secs,
+        IMGCFG_bps,
+        IMGCFG_id,
+        IMGCFG_mode,
+        IMGCFG_interleave,
+        IMGCFG_cskew,
+        IMGCFG_sskew,
+        IMGCFG_rpm,
+        IMGCFG_gap3,
+        IMGCFG_iam,
+        IMGCFG_rate,
+        IMGCFG_file_layout,
+        IMGCFG_nr
+    };
+
+    const static struct opt img_cfg_opts[IMGCFG_nr+1] = {
+        [IMGCFG_cyls] = { "cyls" },
+        [IMGCFG_heads] = { "heads" },
+        [IMGCFG_secs] = { "secs" },
+        [IMGCFG_bps]  = { "bps" },
+        [IMGCFG_id]   = { "id" },
+        [IMGCFG_mode] = { "mode" },
+        [IMGCFG_interleave] = { "interleave" },
+        [IMGCFG_cskew] = { "cskew" },
+        [IMGCFG_sskew] = { "sskew" },
+        [IMGCFG_rpm]  = { "rpm" },
+        [IMGCFG_gap3] = { "gap3" },
+        [IMGCFG_iam]  = { "iam" },
+        [IMGCFG_rate] = { "rate" },
+        [IMGCFG_file_layout] = { "file-layout" },
+    };
+
+    int option;
+    bool_t matched, active, is_fm;
+    struct {
+        FIL file;
+        struct slot slot;
+        char buf[512];
+    } *heap = (void *)im->bufs.read_data.p;
+    struct opts opts = {
+        .file = &heap->file,
+        .opts = img_cfg_opts,
+        .arg = heap->buf,
+        .argmax = sizeof(heap->buf)-1
+    };
+
+    if (!get_img_cfg(&heap->slot))
+        return TR_no_match;
+
+    fatfs_from_slot(&heap->file, &heap->slot, FA_READ);
+
+    matched = active = is_fm = FALSE;
+
+    while ((option = get_next_opt(&opts)) != OPT_eof) {
+
+        if (option == OPT_section) {
+            /* We process this section if we get a tag match, or if this 
+             * is the default section and we have no other match so far. */
+            active = (tag && !strcmp(opts.arg, tag))
+                || (!matched && !strcmp(opts.arg, "default"));
+            if (active) {
+                matched = TRUE;
+                is_fm = FALSE;
+                reset_img_params(im);
+                im->img.interleave = 1;
+                im->img.has_iam = TRUE;
+                init_sec_base(im, 1);
+            }
+        }
+
+        if (!active)
+            continue;
+
+        switch (option) {
+
+        case IMGCFG_cyls:
+            im->nr_cyls = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_heads:
+            im->nr_sides = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_secs:
+            im->img.nr_sectors = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_bps: {
+            int no, sz = strtol(opts.arg, NULL, 10);
+            for (no = 0; no < 8; no++)
+                if ((128u<<no) == sz)
+                    break;
+            im->img.sec_no = no&7;
+            break;
+        }
+        case IMGCFG_id: {
+            int i;
+            char *p = opts.arg;
+            for (i = 0; i < 4; i += 2) {
+                im->img.sec_base[i] = strtol(p, &p, 0);
+                im->img.sec_base[i+1] = (*p == ':') ? strtol(p+1, &p, 0) :
+                    im->img.sec_base[i];
+                if (*p++ != ',')
+                    break;
+            }
+            if (i == 0) {
+                im->img.sec_base[2] = im->img.sec_base[0];
+                im->img.sec_base[3] = im->img.sec_base[1];
+            }
+            break;
+        }
+        case IMGCFG_mode:
+            is_fm = !strcmp(opts.arg, "fm");
+            break;
+        case IMGCFG_interleave:
+            im->img.interleave = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_cskew:
+            im->img.cskew = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_sskew:
+            im->img.sskew = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_rpm:
+            im->img.rpm = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_gap3:
+            im->img.gap_3 = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_iam:
+            im->img.has_iam = !strcmp(opts.arg, "yes");
+            break;
+        case IMGCFG_rate:
+            im->img.data_rate = strtol(opts.arg, NULL, 10);
+            break;
+        case IMGCFG_file_layout: {
+            char *p, *q;
+            for (p = opts.arg; *p != '\0'; p = q) {
+                for (q = p; *q && *q != ','; q++)
+                    continue;
+                if (*q == ',')
+                    *q++ = '\0';
+                if (!strncmp(p, "reverse-side", 12)) {
+                    uint8_t side = !!strtol(p+12, NULL, 10);
+                    im->img.layout |= LAYOUT_reverse_side(side);
+                } else if (!strcmp(p, "sequential")) {
+                    im->img.layout |= LAYOUT_sequential;
+                } else if (!strcmp(p, "sides-swapped")) {
+                    im->img.layout |= LAYOUT_sides_swapped;
+                }
+            }
+            break;
+        }
+
+        }
+    }
+
+    F_close(&heap->file);
+
+    if (!matched)
+        return TR_no_match;
+
+    return (is_fm ? fm_open(im) : mfm_open(im)) ? TR_success : TR_fail;
 }
 
 static bool_t img_open(struct image *im)
 {
     const struct img_type *type;
+    char *dot;
+
+    dot = strrchr(im->slot->name, '.');
+    switch (tag_open(im, dot ? dot+1 : NULL)) {
+    case TR_success:
+        return TRUE;
+    case TR_fail:
+        return FALSE;
+    default:
+        break;
+    }
 
     switch (ff_cfg.host) {
     case HOST_akai:
@@ -236,7 +428,6 @@ static bool_t img_open(struct image *im)
         goto fallback;
     case HOST_nascom:
         type = nascom_type;
-        im->img.skew_cyls_only = TRUE;
         break;
     case HOST_pc98:
         type = pc98_type;
@@ -263,13 +454,13 @@ static bool_t img_open(struct image *im)
 
 fallback:
     /* Fall back to default list. */
-    memset(&im->img, 0, sizeof(im->img));
+    reset_img_params(im);
     return _img_open(im, img_type);
 }
 
 static bool_t d81_open(struct image *im)
 {
-    im->img.layout = LAYOUT_interleaved_swap_sides;
+    im->img.layout = LAYOUT_sides_swapped;
     return _img_open(im, d81_type);
 }
 
@@ -287,7 +478,12 @@ static bool_t st_open(struct image *im)
         out->has_iam = FALSE;
         if (out->nr_secs == 9) {
             /* TOS formats 720kB disks with skew. */
-            out->skew = 2;
+            if (out->nr_sides == _S(1)) {
+                out->cskew = 2;
+            } else { /* out->nr_sides == _S(2) */
+                out->cskew = 4;
+                out->sskew = 2;
+            }
         }
         out++;
     }
@@ -336,8 +532,7 @@ static bool_t pc98fdi_open(struct image *im)
     im->nr_sides = le32toh(header.nr_sides);
     im->img.nr_sectors = le32toh(header.nr_secs);
     im->img.interleave = 1;
-    im->img.sec_base[0] = im->img.sec_base[1] = 1;
-    im->img.skew = 0;
+    init_sec_base(im, 1);
     im->img.has_iam = TRUE;
     /* Skip 4096-byte header. */
     im->img.base_off = le32toh(header.header_size);
@@ -401,8 +596,7 @@ static bool_t msx_open(struct image *im)
             im->nr_sides = bpb.num_heads;
             im->nr_cyls = (im->nr_sides == 1) ? 80 : 40;
             im->img.interleave = 1;
-            im->img.sec_base[0] = im->img.sec_base[1] = 1;
-            im->img.skew = 0;
+            init_sec_base(im, 1);
             im->img.has_iam = TRUE;
             if (mfm_open(im))
                 return TRUE;
@@ -411,7 +605,7 @@ static bool_t msx_open(struct image *im)
     }
 
     /* Use the MSX-specific list. */
-    memset(&im->img, 0, sizeof(im->img));
+    reset_img_params(im);
     if (_img_open(im, msx_type))
         return TRUE;
 
@@ -422,20 +616,21 @@ static bool_t msx_open(struct image *im)
 static bool_t pc_dos_open(struct image *im)
 {
     struct bpb bpb;
+    unsigned int no;
 
     bpb_read(im, &bpb);
 
     if (bpb.sig != 0xaa55)
         goto fail;
 
-    for (im->img.sec_no = 0; im->img.sec_no <= 6; im->img.sec_no++)
-        if (sec_sz(im) == bpb.bytes_per_sec)
+    for (no = 0; no <= 6; no++)
+        if (sec_sz(no) == bpb.bytes_per_sec)
             break;
-    if (im->img.sec_no > 6) /* >8kB? */
+    if (no > 6) /* >8kB? */
         goto fail;
+    im->img.sec_no = no;
 
-    if ((bpb.sec_per_track == 0)
-        || (bpb.sec_per_track > ARRAY_SIZE(im->img.sec_map)))
+    if ((bpb.sec_per_track == 0) || (bpb.sec_per_track > 256))
         goto fail;
     im->img.nr_sectors = bpb.sec_per_track;
 
@@ -449,8 +644,7 @@ static bool_t pc_dos_open(struct image *im)
         goto fail;
 
     im->img.interleave = 1;
-    im->img.sec_base[0] = im->img.sec_base[1] = 1;
-    im->img.skew = 0;
+    init_sec_base(im, 1);
     im->img.has_iam = TRUE;
     return mfm_open(im);
 
@@ -498,8 +692,7 @@ static bool_t trd_open(struct image *im)
 
     im->img.sec_no = 1; /* 256-byte */
     im->img.interleave = 1;
-    im->img.skew = 0;
-    im->img.sec_base[0] = im->img.sec_base[1] = 1;
+    init_sec_base(im, 1);
     im->img.nr_sectors = 16;
     im->img.gap_3 = 57;
     im->img.has_iam = TRUE;
@@ -524,9 +717,8 @@ static bool_t opd_open(struct image *im)
 
     im->img.sec_no = 1; /* 256-byte */
     im->img.interleave = 13;
-    im->img.skew = 13;
-    im->img.skew_cyls_only = TRUE;
-    im->img.sec_base[0] = im->img.sec_base[1] = 0;
+    im->img.cskew = 13;
+    init_sec_base(im, 0);
     im->img.nr_sectors = 18;
     im->img.gap_3 = 12;
     im->img.has_iam = TRUE;
@@ -538,10 +730,9 @@ static bool_t dfs_open(struct image *im)
 {
     im->nr_cyls = 80;
     im->img.interleave = 1;
-    im->img.skew = 3;
-    im->img.skew_cyls_only = TRUE;
+    im->img.cskew = 3;
     im->img.sec_no = 1; /* 256-byte */
-    im->img.sec_base[0] = im->img.sec_base[1] = 0;
+    init_sec_base(im, 0);
     im->img.nr_sectors = 10;
     im->img.gap_3 = 21;
 
@@ -587,7 +778,7 @@ static bool_t sdu_open(struct image *im)
     /* Fill in the rest of the geometry. */
     im->img.sec_no = 2; /* 512-byte sectors */
     im->img.interleave = 1; /* no interleave */
-    im->img.sec_base[0] = im->img.sec_base[1] = 1; /* standard numbering */
+    init_sec_base(im, 1); /* standard numbering */
     im->img.gap_3 = 84; /* standard gap3 */
     im->img.has_iam = TRUE;
 
@@ -631,11 +822,10 @@ static bool_t ti99_open(struct image *im)
 
     im->img.has_iam = FALSE;
     im->img.interleave = 4;
-    im->img.skew = 3;
-    im->img.skew_cyls_only = TRUE;
+    im->img.cskew = 3;
     im->img.sec_no = 1;
-    im->img.sec_base[0] = im->img.sec_base[1] = 0;
-    im->img.layout = LAYOUT_sequential_reverse_side1;
+    init_sec_base(im, 0);
+    im->img.layout = LAYOUT_sequential | LAYOUT_reverse_side(1);
 
     if ((fsize % (40*9)) == 0) {
 
@@ -732,7 +922,7 @@ static bool_t jvc_open(struct image *im)
     im->nr_sides = jvc.sides;
     im->img.sec_no = jvc.ssize_code & 3;
     im->img.interleave = 3; /* RSDOS likes a 3:1 interleave (ref. xroar) */
-    im->img.sec_base[0] = im->img.sec_base[1] = jvc.sec_id;
+    init_sec_base(im, jvc.sec_id);
     im->img.nr_sectors = jvc.spt;
 
     /* Calculate number of cylinders. */
@@ -780,7 +970,7 @@ static bool_t vdk_open(struct image *im)
     /* Fill in the rest of the geometry. */
     im->img.sec_no = 1; /* 256-byte sectors */
     im->img.interleave = 2; /* DDOS likes a 2:1 interleave (ref. xroar) */
-    im->img.sec_base[0] = im->img.sec_base[1] = 1;
+    init_sec_base(im, 1);
     im->img.nr_sectors = 18;
     im->img.gap_3 = 20;
     im->img.gap_4a = 54;
@@ -929,7 +1119,7 @@ const struct image_handler ti99_image_handler = {
 
 static void img_extend(struct image *im)
 {
-    unsigned int sz = (im->img.nr_sectors * sec_sz(im)
+    unsigned int sz = (im->img.nr_sectors * sec_sz(im->img.sec_no)
                        * im->nr_sides * im->nr_cyls) + im->img.base_off;
     if (f_size(&im->fp) >= sz)
         return;
@@ -943,35 +1133,37 @@ static void img_seek_track(
     struct image *im, uint16_t track, unsigned int cyl, unsigned int side)
 {
     uint32_t trk_len;
-    unsigned int base, i, pos, trk = cyl * im->nr_sides + side;
+    unsigned int base, i, pos, _c, _s, idx;
+    struct img_sec *sec = im->img.sec_info;
 
     im->cur_track = track;
 
     /* Create logical sector map in rotational order. */
     memset(im->img.sec_map, 0xff, im->img.nr_sectors);
-    pos = ((im->img.skew_cyls_only ? cyl : trk) * im->img.skew)
-        % im->img.nr_sectors;
+    pos = ((cyl*im->img.cskew) + (side*im->img.sskew)) % im->img.nr_sectors;
     base = sec_base(im);
     for (i = 0; i < im->img.nr_sectors; i++) {
         while (im->img.sec_map[pos] != 0xff)
             pos = (pos + 1) % im->img.nr_sectors;
-        im->img.sec_map[pos] = i + base;
+        im->img.sec_map[pos] = i;
+        sec->id = i + base;
+        sec->no = im->img.sec_no;
+        sec++;
         pos = (pos + im->img.interleave) % im->img.nr_sectors;
     }
 
-    trk_len = im->img.nr_sectors * sec_sz(im);
-    switch (im->img.layout) {
-    case LAYOUT_sequential_reverse_side1:
-        im->img.trk_off = (side ? 2*im->nr_cyls - cyl - 1 : cyl) * trk_len;
-        break;
-    case LAYOUT_interleaved_swap_sides:
-        trk ^= im->nr_sides - 1;
-        /* fall through */
-    default:
-        im->img.trk_off = trk * trk_len;
-        break;
-    }
-    im->img.trk_off += im->img.base_off;
+    trk_len = im->img.nr_sectors * sec_sz(im->img.sec_no);
+    _c = (im->img.layout & LAYOUT_reverse_side(side))
+        ? im->nr_cyls - cyl - 1
+        : cyl;
+    _s = (im->img.layout & LAYOUT_sides_swapped)
+        ? side ^ (im->nr_sides - 1)
+        : side;
+    idx = (im->img.layout & LAYOUT_sequential)
+        ? (_s * im->nr_cyls) + _c
+        : (_c * im->nr_sides) + _s;
+
+    im->img.trk_off = (idx * trk_len) + im->img.base_off;
 }
 
 static uint32_t calc_start_pos(struct image *im)
@@ -985,14 +1177,21 @@ static uint32_t calc_start_pos(struct image *im)
         /* Post-index track gap */
         im->img.decode_pos = 0;
     } else {
-        unsigned int ess = enc_sec_sz(im);
+        uint8_t *sec_map = im->img.sec_map;
+        unsigned int i, ess;
+        struct img_sec *sec;
         decode_off -= im->img.idx_sz;
-        im->img.decode_pos = decode_off / ess;
-        if (im->img.decode_pos < im->img.nr_sectors) {
+        for (i = 0; i < im->img.nr_sectors; i++) {
+            sec = &im->img.sec_info[*sec_map++];
+            ess = enc_sec_sz(im, sec);
+            if (decode_off < ess)
+                break;
+            decode_off -= ess;
+        }
+        if (i < im->img.nr_sectors) {
             /* IDAM */
-            im->img.trk_sec = im->img.decode_pos;
-            im->img.decode_pos = im->img.decode_pos * 4 + 1;
-            decode_off -= im->img.trk_sec * ess;
+            im->img.trk_sec = i;
+            im->img.decode_pos = i * 4 + 1;
             if (decode_off >= im->img.idam_sz) {
                 /* DAM */
                 decode_off -= im->img.idam_sz;
@@ -1001,24 +1200,22 @@ static uint32_t calc_start_pos(struct image *im)
                     /* Data or Post Data */
                     decode_off -= im->img.dam_sz_pre;
                     im->img.decode_pos++;
-                    if (decode_off < sec_sz(im)) {
+                    if (decode_off < sec_sz(sec->no)) {
                         /* Data */
                         im->img.rd_sec_pos = decode_off / 1024;
                         im->img.decode_data_pos = im->img.rd_sec_pos;
                         decode_off %= 1024;
                     } else {
                         /* Post Data */
-                        decode_off -= sec_sz(im);
+                        decode_off -= sec_sz(sec->no);
                         im->img.decode_pos++;
                         /* Start fetch at next sector. */
-                        im->img.trk_sec = (im->img.trk_sec + 1)
-                            % im->img.nr_sectors;
+                        im->img.trk_sec = (i + 1) % im->img.nr_sectors;
                     }
                 }
             }
         } else {
             /* Pre-index track gap */
-            decode_off -= im->img.nr_sectors * ess;
             im->img.decode_pos = im->img.nr_sectors * 4 + 1;
             im->img.decode_data_pos = decode_off / 1024;
             decode_off %= 1024;
@@ -1072,7 +1269,155 @@ static bool_t img_read_track(struct image *im)
 
 static bool_t img_write_track(struct image *im)
 {
-    return (im->sync == SYNC_fm) ? fm_write_track(im) : mfm_write_track(im);
+    const uint8_t mfm_dam_header[] = { 0xa1, 0xa1, 0xa1, 0xfb };
+
+    bool_t flush;
+    struct write *write = get_write(im, im->wr_cons);
+    struct image_buf *wr = &im->bufs.write_bc;
+    uint16_t *buf = wr->p;
+    unsigned int bufmask = (wr->len / 2) - 1;
+    uint8_t *wrbuf = im->bufs.write_data.p;
+    uint32_t c = wr->cons / 16, p = wr->prod / 16;
+    struct img_sec *sec;
+    unsigned int i, off;
+    time_t t;
+    uint16_t crc, sec_sz;
+    uint8_t id, x, *sec_map;
+    int32_t base;
+
+    /* If we are processing final data then use the end index, rounded up. */
+    barrier();
+    flush = (im->wr_cons != im->wr_bc);
+    if (flush)
+        p = (write->bc_end + 15) / 16;
+
+    if (im->img.write_sector == -1) {
+        base = write->start / im->ticks_per_cell; /* in data bytes */
+        sec_map = im->img.sec_map;
+
+        /* Convert write offset to sector number (in rotational order). */
+        base -= im->img.idx_sz + im->img.idam_sz;
+        for (i = 0; i < im->img.nr_sectors; i++) {
+            /* Within small range of expected data start? */
+            if ((base >= -64) && (base <= 64))
+                break;
+            base -= enc_sec_sz(im, &im->img.sec_info[*sec_map++]);
+        }
+
+        /* Convert rotational order to logical order. */
+        if (i >= im->img.nr_sectors) {
+            printk("IMG Bad Sector Offset: %u -> %u\n", base, i);
+            im->img.write_sector = -2;
+        } else {
+            im->img.write_sector = *sec_map;
+        }
+    }
+
+    for (;;) {
+
+        sec_sz = (im->img.write_sector >= 0)
+            ? sec_sz(im->img.sec_info[im->img.write_sector].no) : 128;
+
+        if (im->sync == SYNC_fm) {
+
+            uint16_t sync;
+            if ((int16_t)(p - c) < (2 + sec_sz + 2))
+                break;
+            if (buf[c++ & bufmask] != 0xaaaa)
+                continue;
+            sync = buf[c & bufmask];
+            if (mfmtobin(sync >> 1) != FM_SYNC_CLK)
+                continue;
+            x = mfmtobin(sync);
+            c++;
+
+        } else { /* MFM */
+
+            if ((int16_t)(p - c) < (3 + sec_sz + 2))
+                break;
+            /* Scan for sync words and IDAM. Because of the way we sync we
+             * expect to see only 2*4489 and thus consume only 3 words for the
+             * header. */
+            if (be16toh(buf[c++ & bufmask]) != 0x4489)
+                continue;
+            for (i = 0; i < 2; i++)
+                if ((x = mfmtobin(buf[c++ & bufmask])) != 0xa1)
+                    break;
+
+        }
+
+        switch (x) {
+
+        case 0xfe: /* IDAM */
+            if (im->sync == SYNC_fm) {
+                wrbuf[0] = x;
+                for (i = 1; i < 7; i++)
+                    wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
+                id = wrbuf[3];
+            } else { /* MFM */
+                for (i = 0; i < 3; i++)
+                    wrbuf[i] = 0xa1;
+                wrbuf[i++] = x;
+                for (; i < 10; i++)
+                    wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
+                id = wrbuf[6];
+            }
+            crc = crc16_ccitt(wrbuf, i, 0xffff);
+            if (crc != 0) {
+                printk("IMG IDAM Bad CRC %04x, sector %u\n", crc, id);
+                break;
+            }
+            /* Search by sector id for this sector's logical order. */
+            for (i = 0, sec = im->img.sec_info;
+                 (i < im->img.nr_sectors) && (sec->id != id);
+                 i++, sec++)
+                continue;
+            im->img.write_sector = i;
+            if (i >= im->img.nr_sectors) {
+                printk("IMG IDAM Bad Sector: %02x\n", id);
+                im->img.write_sector = -2;
+            }
+            break;
+
+        case 0xfb: /* DAM */
+            for (i = 0; i < (sec_sz + 2); i++)
+                wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
+
+            if (im->img.write_sector < 0) {
+                printk("IMG DAM for unknown sector (%d)\n",
+                       im->img.write_sector);
+                break;
+            }
+
+            sec = &im->img.sec_info[im->img.write_sector];
+
+            crc = (im->sync == SYNC_fm)
+                ? crc16_ccitt(&x, 1, 0xffff)
+                : crc16_ccitt(mfm_dam_header, 4, 0xffff);
+            crc = crc16_ccitt(wrbuf, sec_sz + 2, crc);
+            if (crc != 0) {
+                printk("IMG Bad CRC %04x, sector %u[%02x]\n",
+                       crc, im->img.write_sector, sec->id);
+                break;
+            }
+
+            /* All good: write out to mass storage. */
+            printk("Write %u[%02x]/%u... ", im->img.write_sector,
+                   sec->id, im->img.nr_sectors);
+            t = time_now();
+            sec = im->img.sec_info;
+            for (i = off = 0; i < im->img.write_sector; i++)
+                off += sec_sz(sec++->no);
+            F_lseek(&im->fp, im->img.trk_off + off);
+            F_write(&im->fp, wrbuf, sec_sz, NULL);
+            printk("%u us\n", time_diff(t, time_now()) / TIME_MHZ);
+            break;
+        }
+    }
+
+    wr->cons = c * 16;
+
+    return flush;
 }
 
 static void img_dump_info(struct image *im)
@@ -1081,24 +1426,42 @@ static void img_dump_info(struct image *im)
            im->nr_cyls, im->nr_sides, im->img.nr_sectors);
     printk(" rpm: %u, tracklen: %u, datarate: %u\n",
            im->img.rpm, im->tracklen_bc, im->img.data_rate);
-    printk(" gap2: %u, gap3: %u, gap4a: %u, gap4: %u\n",
-           im->img.gap_2, im->img.gap_3, im->img.gap_4a, im->img.gap_4);
-    printk(" ticks_per_cell: %u, write_bc_ticks: %u has_iam: %u\n",
+    printk(" data: %u, gap2: %u, gap3: %u, gap4a: %u, gap4: %u\n",
+           128u << im->img.sec_no, im->img.gap_2, im->img.gap_3,
+           im->img.gap_4a, im->img.gap_4);
+    printk(" ticks_per_cell: %u, write_bc_ticks: %u, has_iam: %u\n",
            im->ticks_per_cell, im->write_bc_ticks, im->img.has_iam);
+    printk(" interleave: %u, cskew %u, sskew %u, base %x:%x,%x:%x\n",
+           im->img.interleave, im->img.cskew, im->img.sskew,
+           im->img.sec_base[0], im->img.sec_base[1],
+           im->img.sec_base[2], im->img.sec_base[3]);
+    printk(" file-layout: %x\n", im->img.layout);
 }
 
 static void img_fetch_data(struct image *im)
 {
     struct image_buf *rd = &im->bufs.read_data;
-    uint8_t sec, *buf = rd->p;
+    uint8_t *buf = rd->p;
+    struct img_sec *sec;
+    uint8_t *sec_map;
     uint16_t off, len;
+    unsigned int i;
 
     if (rd->prod != rd->cons)
         return;
 
-    sec = im->img.sec_map[im->img.trk_sec] - sec_base(im);
-    off = sec * sec_sz(im) + im->img.rd_sec_pos * 1024;
-    len = sec_sz(im) - im->img.rd_sec_pos * 1024;
+    off = 0;
+    sec_map = im->img.sec_map;
+    for (i = 0; i < im->img.trk_sec; i++) {
+        sec = &im->img.sec_info[*sec_map++];
+        off += sec_sz(sec->no);
+    }
+
+    sec = &im->img.sec_info[*sec_map];
+    len = sec_sz(sec->no);
+
+    off += im->img.rd_sec_pos * 1024;
+    len -= im->img.rd_sec_pos * 1024;
 
     if (len > 1024) {
         len = 1024;
@@ -1113,6 +1476,22 @@ static void img_fetch_data(struct image *im)
     F_read(&im->fp, buf, len, NULL);
 
     rd->prod++;
+}
+
+static bool_t img_prep(struct image *im)
+{
+    if ((im->nr_sides < 1) || (im->nr_sides > 2)
+        || (im->nr_cyls < 1) || (im->nr_cyls > 254)
+        || (im->img.nr_sectors < 1) || (im->img.nr_sectors > 256))
+        return FALSE;
+
+    im->img.sec_map = (uint8_t *)im->bufs.read_data.p
+        + im->bufs.read_data.len - 256;
+    im->img.sec_info = (struct img_sec *)im->img.sec_map - 256;
+
+    im->img.rpm = im->img.rpm ?: 300;
+
+    return TRUE;
 }
 
 
@@ -1132,17 +1511,16 @@ static bool_t mfm_open(struct image *im)
 {
     const uint8_t GAP_3[] = { 32, 54, 84, 116, 255, 255, 255, 255 };
     uint32_t tracklen;
+    uint8_t gap_3 = im->img.gap_3;
+    uint8_t *sec_map;
     unsigned int i;
 
-    if ((im->nr_sides < 1) || (im->nr_sides > 2)
-        || (im->nr_cyls < 1) || (im->nr_cyls > 254)
-        || (im->img.nr_sectors < 1)
-        || (im->img.nr_sectors > ARRAY_SIZE(im->img.sec_map)))
+    if (!img_prep(im))
         return FALSE;
 
-    im->img.rpm = im->img.rpm ?: 300;
     im->img.gap_2 = im->img.gap_2 ?: GAP_2;
-    im->img.gap_3 = im->img.gap_3 ?: GAP_3[im->img.sec_no];
+    /* GAP_SYNC is a suitable small initial guess for auto GAP3. */
+    im->img.gap_3 = im->img.gap_3 ?: GAP_SYNC;
     im->img.gap_4a = im->img.gap_4a ?: GAP_4A;
 
     im->stk_per_rev = (stk_ms(200) * 300) / im->img.rpm;
@@ -1158,18 +1536,36 @@ static bool_t mfm_open(struct image *im)
     im->img.dam_sz_post += im->img.post_crc_syncs;
 
     /* Work out minimum track length (with no pre-index track gap). */
-    tracklen = enc_sec_sz(im) * im->img.nr_sectors;
-    tracklen += im->img.idx_sz;
+    sec_map = im->img.sec_map;
+    tracklen = im->img.idx_sz;
+    for (i = 0; i < im->img.nr_sectors; i++)
+        tracklen += enc_sec_sz(im, &im->img.sec_info[*sec_map++]);
     tracklen *= 16;
 
-    /* Infer the data rate and hence the standard track length. */
-    for (i = 0; i < 3; i++) { /* SD=0, DD=1, HD=2, ED=3 */
-        uint32_t maxlen = (((50000u * 300) / im->img.rpm) << i) + 5000;
-        if (tracklen < maxlen)
-            break;
+    if (im->img.data_rate == 0) {
+        /* Infer the data rate. */
+        for (i = 1; i < 3; i++) { /* DD=1, HD=2, ED=3 */
+            uint32_t maxlen = (((50000u * 300) / im->img.rpm) << i) + 5000;
+            if (tracklen < maxlen)
+                break;
+        }
+        im->img.data_rate = 125u << i; /* DD=250, HD=500, ED=1000 */
     }
-    im->img.data_rate = 250u << i; /* SD=250, DD=500, HD=1000, ED=2000 */
-    im->tracklen_bc = (im->img.data_rate * 200 * 300) / im->img.rpm;
+
+    /* Calculate standard track length from data rate and RPM. */
+    im->tracklen_bc = (im->img.data_rate * 400 * 300) / im->img.rpm;
+
+    /* Calculate a suitable GAP3 if not specified. */
+    if (gap_3 == 0) {
+        int space;
+        im->img.dam_sz_post -= im->img.gap_3;
+        tracklen -= 16 * im->img.nr_sectors * im->img.gap_3;
+        space = max_t(int, 0, im->tracklen_bc - tracklen);
+        im->img.gap_3 = min_t(int, space/(16*im->img.nr_sectors),
+                              GAP_3[im->img.sec_no]);
+        im->img.dam_sz_post += im->img.gap_3;
+        tracklen += 16 * im->img.nr_sectors * im->img.gap_3;
+    }
 
     /* Does the track data fit within standard track length? */
     if (im->tracklen_bc < tracklen) {
@@ -1191,7 +1587,7 @@ static bool_t mfm_open(struct image *im)
                           / im->tracklen_bc);
     im->img.gap_4 = (im->tracklen_bc - tracklen) / 16;
 
-    im->write_bc_ticks = sysclk_ms(1) / im->img.data_rate;
+    im->write_bc_ticks = sysclk_us(500) / im->img.data_rate;
 
     im->sync = SYNC_mfm;
 
@@ -1257,12 +1653,13 @@ static bool_t mfm_read_track(struct image *im)
         for (i = 0; i < sz; i++)
             emit_byte(0x4e);
     } else {
+        struct img_sec *sec = &im->img.sec_info[im->img.sec_map[(
+                    im->img.decode_pos-1)>>2]];
         switch ((im->img.decode_pos - 1) & 3) {
         case 0: /* IDAM */ {
             uint8_t cyl = im->cur_track/2, hd = im->cur_track&1;
-            uint8_t sec = im->img.sec_map[(im->img.decode_pos-1) >> 2];
-            uint8_t idam[8] = { 0xa1, 0xa1, 0xa1, 0xfe, cyl, hd, sec,
-                                im->img.sec_no };
+            uint8_t idam[8] = { 0xa1, 0xa1, 0xa1, 0xfe, cyl, hd,
+                                sec->id, sec->no };
             if (bc_space < im->img.idam_sz)
                 return FALSE;
             for (i = 0; i < idam_gap_sync(im); i++)
@@ -1293,7 +1690,7 @@ static bool_t mfm_read_track(struct image *im)
             break;
         }
         case 2: /* Data */ {
-            uint16_t sec_sz = sec_sz(im);
+            uint16_t sec_sz = sec_sz(sec->no);
             sec_sz -= im->img.decode_data_pos * 1024;
             if (bc_space < min_t(unsigned int, sec_sz, 1024))
                 return FALSE;
@@ -1334,164 +1731,68 @@ static bool_t mfm_read_track(struct image *im)
     return TRUE;
 }
 
-static bool_t mfm_write_track(struct image *im)
-{
-    const uint8_t header[] = { 0xa1, 0xa1, 0xa1, 0xfb };
-
-    bool_t flush;
-    struct write *write = get_write(im, im->wr_cons);
-    struct image_buf *wr = &im->bufs.write_bc;
-    uint16_t *buf = wr->p;
-    unsigned int bufmask = (wr->len / 2) - 1;
-    uint8_t *wrbuf = im->bufs.write_data.p;
-    uint32_t c = wr->cons / 16, p = wr->prod / 16;
-    uint32_t base = write->start / im->ticks_per_cell; /* in data bytes */
-    unsigned int i;
-    time_t t;
-    uint16_t crc;
-    uint8_t x;
-
-    /* If we are processing final data then use the end index, rounded up. */
-    barrier();
-    flush = (im->wr_cons != im->wr_bc);
-    if (flush)
-        p = (write->bc_end + 15) / 16;
-
-    if (im->img.write_sector == -1) {
-        /* Convert write offset to sector number (in rotational order). */
-        im->img.write_sector =
-            (base - im->img.idx_sz - im->img.idam_sz + enc_sec_sz(im)/2)
-            / enc_sec_sz(im);
-        if (im->img.write_sector >= im->img.nr_sectors) {
-            printk("IMG Bad Sector Offset: %u -> %u\n",
-                   base, im->img.write_sector);
-            im->img.write_sector = -2;
-        } else {
-            /* Convert rotational order to logical order. */
-            im->img.write_sector = im->img.sec_map[im->img.write_sector];
-            im->img.write_sector -= sec_base(im);
-        }
-    }
-
-    while ((int16_t)(p - c) >= (3 + sec_sz(im) + 2)) {
-
-        /* Scan for sync words and IDAM. Because of the way we sync we expect
-         * to see only 2*4489 and thus consume only 3 words for the header. */
-        if (be16toh(buf[c++ & bufmask]) != 0x4489)
-            continue;
-        for (i = 0; i < 2; i++)
-            if ((x = mfmtobin(buf[c++ & bufmask])) != 0xa1)
-                break;
-
-        switch (x) {
-
-        case 0xfe: /* IDAM */
-            for (i = 0; i < 3; i++)
-                wrbuf[i] = 0xa1;
-            wrbuf[i++] = x;
-            for (; i < 10; i++)
-                wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
-            crc = crc16_ccitt(wrbuf, i, 0xffff);
-            if (crc != 0) {
-                printk("IMG IDAM Bad CRC %04x, sector %u\n", crc, wrbuf[6]);
-                break;
-            }
-            im->img.write_sector = wrbuf[6] - sec_base(im);
-            if ((uint8_t)im->img.write_sector >= im->img.nr_sectors) {
-                printk("IMG IDAM Bad Sector: %u\n", wrbuf[6]);
-                im->img.write_sector = -2;
-            }
-            break;
-
-        case 0xfb: /* DAM */
-            for (i = 0; i < (sec_sz(im) + 2); i++)
-                wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
-
-            crc = crc16_ccitt(wrbuf, sec_sz(im) + 2,
-                              crc16_ccitt(header, 4, 0xffff));
-            if (crc != 0) {
-                printk("IMG Bad CRC %04x, sector %u[%u]\n",
-                       crc, im->img.write_sector,
-                       im->img.write_sector + im->img.sec_base);
-                break;
-            }
-
-            if (im->img.write_sector < 0) {
-                printk("IMG DAM for unknown sector (%d)\n",
-                       im->img.write_sector);
-                break;
-            }
-
-            /* All good: write out to mass storage. */
-            printk("Write %u[%u]/%u... ", im->img.write_sector,
-                   im->img.write_sector + im->img.sec_base,
-                   im->img.nr_sectors);
-            t = time_now();
-            F_lseek(&im->fp,
-                    im->img.trk_off + im->img.write_sector*sec_sz(im));
-            F_write(&im->fp, wrbuf, sec_sz(im), NULL);
-            printk("%u us\n", time_diff(t, time_now()) / TIME_MHZ);
-            break;
-        }
-    }
-
-    wr->cons = c * 16;
-
-    return flush;
-}
-
 
 /*
  * FM-Specific Handlers
  */
 
-/* 8271 mini-diskette values */
-#define FM_GAP_2 11
-#define FM_GAP_4A 16
+#define FM_GAP_1 26 /* Post-IAM */
+#define FM_GAP_2 11 /* Post-IDAM */
 #define FM_GAP_SYNC 6
 
 static bool_t fm_open(struct image *im)
 {
     const uint8_t FM_GAP_3[] = { 27, 42, 58, 138, 255, 255, 255, 255 };
     uint32_t tracklen;
+    uint8_t *sec_map;
+    unsigned int i;
 
-    if ((im->nr_sides < 1) || (im->nr_sides > 2)
-        || (im->nr_cyls < 1) || (im->nr_cyls > 254)
-        || (im->img.nr_sectors < 1)
-        || (im->img.nr_sectors > ARRAY_SIZE(im->img.sec_map)))
+    if (!img_prep(im))
         return FALSE;
 
-    im->img.rpm = im->img.rpm ?: 300;
     im->img.gap_2 = im->img.gap_2 ?: FM_GAP_2;
-    im->img.gap_3 = im->img.gap_3 ?: FM_GAP_3[im->img.sec_no];
-    im->img.gap_4a = im->img.gap_4a ?: FM_GAP_4A;
+    /* Default post-index gap size depends on whether the track format includes 
+     * IAM or not (see uPD765A/7265 Datasheet). */
+    im->img.gap_4a = im->img.gap_4a ?: im->img.has_iam ? 40 : 16;
 
     im->stk_per_rev = (stk_ms(200) * 300) / im->img.rpm;
 
     im->img.idx_sz = im->img.gap_4a;
+    if (im->img.has_iam)
+        im->img.idx_sz += FM_GAP_SYNC + 1 + FM_GAP_1;
     im->img.idam_sz = FM_GAP_SYNC + 5 + 2 + im->img.gap_2;
     im->img.dam_sz_pre = FM_GAP_SYNC + 1;
     im->img.dam_sz_post = 2 + im->img.gap_3;
 
     /* Work out minimum track length (with no pre-index track gap). */
-    tracklen = enc_sec_sz(im) * im->img.nr_sectors;
-    tracklen += im->img.idx_sz;
+    sec_map = im->img.sec_map;
+    tracklen = im->img.idx_sz;
+    for (i = 0; i < im->img.nr_sectors; i++)
+        tracklen += enc_sec_sz(im, &im->img.sec_info[*sec_map++]);
     tracklen *= 16;
 
-    /* Data rate is always SD. */
-    im->img.data_rate = 250; /* SD */
-    im->tracklen_bc = (im->img.data_rate * 200 * 300) / im->img.rpm;
+    /* Calculate data rate and track length. */
+    im->img.data_rate = im->img.data_rate ?: 125; /* SD */
+    im->tracklen_bc = (im->img.data_rate * 400 * 300) / im->img.rpm;
 
-    ASSERT(im->tracklen_bc > tracklen);
+    /* Calculate a suitable GAP3 if not specified. */
+    if (im->img.gap_3 == 0) {
+        int space = max_t(int, 0, im->tracklen_bc - tracklen);
+        im->img.gap_3 = min_t(int, space/(16*im->img.nr_sectors),
+                              FM_GAP_3[im->img.sec_no]);
+        im->img.dam_sz_post += im->img.gap_3;
+        tracklen += 16 * im->img.nr_sectors * im->img.gap_3;
+    }
 
-    /* Round the track length up to a multiple of 32 bitcells. */
+    /* Round the track length up to fit the data and be a multiple of 32. */
+    im->tracklen_bc = max_t(uint32_t, im->tracklen_bc, tracklen);
     im->tracklen_bc = (im->tracklen_bc + 31) & ~31;
 
     im->ticks_per_cell = ((sysclk_stk(im->stk_per_rev) * 16u)
                           / im->tracklen_bc);
     im->img.gap_4 = (im->tracklen_bc - tracklen) / 16;
 
-    im->write_bc_ticks = sysclk_ms(1) / im->img.data_rate;
+    im->write_bc_ticks = sysclk_us(500) / im->img.data_rate;
 
     im->sync = SYNC_fm;
 
@@ -1536,7 +1837,14 @@ static bool_t fm_read_track(struct image *im)
             return FALSE;
         for (i = 0; i < im->img.gap_4a; i++)
             emit_byte(0xff);
-        ASSERT(!im->img.has_iam);
+        if (im->img.has_iam) {
+            /* IAM */
+            for (i = 0; i < FM_GAP_SYNC; i++)
+                emit_byte(0x00);
+            emit_raw(fm_sync(0xfc, 0xd7));
+            for (i = 0; i < FM_GAP_1; i++)
+                emit_byte(0xff);
+        }
     } else if (im->img.decode_pos == (im->img.nr_sectors * 4 + 1)) {
         /* Pre-index track gap */
         uint16_t sz = im->img.gap_4 - im->img.decode_data_pos * 1024;
@@ -1553,11 +1861,12 @@ static bool_t fm_read_track(struct image *im)
         for (i = 0; i < sz; i++)
             emit_byte(0xff);
     } else {
+        struct img_sec *sec = &im->img.sec_info[im->img.sec_map[(
+                    im->img.decode_pos-1)>>2]];
         switch ((im->img.decode_pos - 1) & 3) {
         case 0: /* IDAM */ {
             uint8_t cyl = im->cur_track/2, hd = im->cur_track&1;
-            uint8_t sec = im->img.sec_map[(im->img.decode_pos-1) >> 2];
-            uint8_t idam[5] = { 0xfe, cyl, hd, sec, im->img.sec_no };
+            uint8_t idam[5] = { 0xfe, cyl, hd, sec->id, sec->no };
             if (bc_space < im->img.idam_sz)
                 return FALSE;
             for (i = 0; i < FM_GAP_SYNC; i++)
@@ -1583,7 +1892,7 @@ static bool_t fm_read_track(struct image *im)
             break;
         }
         case 2: /* Data */ {
-            uint16_t sec_sz = sec_sz(im);
+            uint16_t sec_sz = sec_sz(sec->no);
             sec_sz -= im->img.decode_data_pos * 1024;
             if (bc_space < min_t(unsigned int, sec_sz, 1024))
                 return FALSE;
@@ -1620,108 +1929,6 @@ static bool_t fm_read_track(struct image *im)
     bc->prod = bc_p * 16;
 
     return TRUE;
-}
-
-static bool_t fm_write_track(struct image *im)
-{
-    bool_t flush;
-    struct write *write = get_write(im, im->wr_cons);
-    struct image_buf *wr = &im->bufs.write_bc;
-    uint16_t *buf = wr->p;
-    unsigned int bufmask = (wr->len / 2) - 1;
-    uint8_t *wrbuf = im->bufs.write_data.p;
-    uint32_t c = wr->cons / 16, p = wr->prod / 16;
-    uint32_t base = write->start / im->ticks_per_cell; /* in data bytes */
-    unsigned int i;
-    time_t t;
-    uint16_t crc, sync;
-    uint8_t x;
-
-    /* If we are processing final data then use the end index, rounded up. */
-    barrier();
-    flush = (im->wr_cons != im->wr_bc);
-    if (flush)
-        p = (write->bc_end + 15) / 16;
-
-    if (im->img.write_sector == -1) {
-        /* Convert write offset to sector number (in rotational order). */
-        im->img.write_sector =
-            (base - im->img.idx_sz - im->img.idam_sz + enc_sec_sz(im)/2)
-            / enc_sec_sz(im);
-        if (im->img.write_sector >= im->img.nr_sectors) {
-            printk("IMG Bad Sector Offset: %u -> %u\n",
-                   base, im->img.write_sector);
-            im->img.write_sector = -2;
-        } else {
-            /* Convert rotational order to logical order. */
-            im->img.write_sector = im->img.sec_map[im->img.write_sector];
-            im->img.write_sector -= sec_base(im);
-        }
-    }
-
-    while ((int16_t)(p - c) >= (2 + sec_sz(im) + 2)) {
-
-        if (buf[c++ & bufmask] != 0xaaaa)
-            continue;
-        sync = buf[c & bufmask];
-        if (mfmtobin(sync >> 1) != FM_SYNC_CLK)
-            continue;
-        x = mfmtobin(sync);
-        c++;
-
-        switch (x) {
-
-        case 0xfe: /* IDAM */
-            wrbuf[0] = x;
-            for (i = 1; i < 7; i++)
-                wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
-            crc = crc16_ccitt(wrbuf, i, 0xffff);
-            if (crc != 0) {
-                printk("IMG IDAM Bad CRC %04x, sector %u\n", crc, wrbuf[3]);
-                break;
-            }
-            im->img.write_sector = wrbuf[3] - sec_base(im);
-            if ((uint8_t)im->img.write_sector >= im->img.nr_sectors) {
-                printk("IMG IDAM Bad Sector: %u\n", wrbuf[3]);
-                im->img.write_sector = -2;
-            }
-            break;
-
-        case 0xfb: /* DAM */
-            for (i = 0; i < (sec_sz(im) + 2); i++)
-                wrbuf[i] = mfmtobin(buf[c++ & bufmask]);
-
-            crc = crc16_ccitt(wrbuf, sec_sz(im) + 2,
-                              crc16_ccitt(&x, 1, 0xffff));
-            if (crc != 0) {
-                printk("IMG Bad CRC %04x, sector %u[%u]\n",
-                       crc, im->img.write_sector,
-                       im->img.write_sector + im->img.sec_base);
-                break;
-            }
-
-            if (im->img.write_sector < 0) {
-                printk("IMG DAM for unknown sector (%d)\n",
-                       im->img.write_sector);
-                break;
-            }
-
-            /* All good: write out to mass storage. */
-            printk("Write %u[%u]/%u... ", im->img.write_sector,
-                   im->img.write_sector + im->img.sec_base,
-                   im->img.nr_sectors);
-            t = time_now();
-            F_lseek(&im->fp,
-                    im->img.trk_off + im->img.write_sector*sec_sz(im));
-            F_write(&im->fp, wrbuf, sec_sz(im), NULL);
-            printk("%u us\n", time_diff(t, time_now()) / TIME_MHZ);
-            break;
-        }
-    }
-
-    wr->cons = c * 16;
-
-    return flush;
 }
 
 /*

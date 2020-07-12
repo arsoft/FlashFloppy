@@ -1,9 +1,18 @@
 # FlashFloppy
 
-A retro floppy emulator for the ubiquitous Gotek hardware.
-- Directly supports a [wide range of image formats][Image-Formats]
+**FlashFloppy** is a floppy-drive emulator for the ubiquitous
+[**Gotek**][Gotek-Compatibility] hardware. Connect to retro machines just
+like a real floppy drive but use disk images on a modern USB stick!
+- Say goodbye to old and unreliable floppy disks
+- Download and play from the disk-image archives for your retro machines
+
+**FlashFloppy** is the **#1 floppy emulator**:
+- Supports a [massive range][Host-Platforms] of retro computers, synths, and machinery
+- Directly reads and writes [many image formats][Image-Formats]
 - [Flexible track layout][Track-Layouts] for Raw Sector Images
 - [Extremely configurable][FF.CFG-Configuration-File]
+
+**FlashFloppy** is **Free and Open-Source Software**.
 
 ## Download
 - [**Download FlashFloppy**][Downloads]
@@ -14,13 +23,11 @@ A retro floppy emulator for the ubiquitous Gotek hardware.
 ## Donations
 
 FlashFloppy is a labour of love: working on it takes a **lot** of time
-and effort. The development of new features, plus maintenance, bug
-fixing, testing, release preparations and so on is a huge undertaking;
-and that ignores non-development tasks such as writing documentation
-and community management.
+and effort. Although it is [Free Software](Redistribution) and
+a pet project of mine, beer & coffee tokens will fuel me in the
+push onwards and upwards!
 
-If you would like to **support FlashFloppy's development**, please see
-the [**Donations page**][Donations].
+For further information please see the [**Donations page**][Donations].
 
 ## Redistribution
 
@@ -38,6 +45,8 @@ file on your selling page. For example:
 - FlashFloppy is free software. For more information see the
   [license](COPYING).
 
+[Gotek-Compatibility]: https://github.com/keirf/FlashFloppy/wiki/Gotek-Compatibility
+[Host-Platforms]: https://github.com/keirf/FlashFloppy/wiki/Host-Platforms
 [Image-Formats]: https://github.com/keirf/FlashFloppy/wiki/Image-Formats
 [Track-Layouts]: https://github.com/keirf/FlashFloppy/wiki/Track-Layouts
 [FF.CFG-Configuration-File]: https://github.com/keirf/FlashFloppy/wiki/FF.CFG-Configuration-File
